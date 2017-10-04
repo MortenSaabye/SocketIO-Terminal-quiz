@@ -12,92 +12,93 @@ io.on('connection', onConnect)
 
 
 let channels = []
-
+function getChannel(clientData) {
+   return io.sockets.adapter.rooms[clientData.channel]
+}
+function getSocket(clientData) {
+   return io.sockets.connected[clientData.socketId]
+}
 
 function onConnect(socket) {
-   let clientData = {
-      name: String,
-      channel: String,
-      index: Number,
-      isModerator: Boolean
-   }
-   socket.leave(Object.keys(io.sockets.adapter.rooms)[Object.keys(io.sockets.adapter.rooms).length - 1])
-   socket.emit('succes', "You have been connected.")
-   socket.on('join', (clientName) => {
-      clientData.name = clientName
-      handleName(clientName, socket)
-      socket.on('subscribe', (channel) => {
-         clientData.channel = channel
-         handleSubscribersAndChannel(clientData, socket) 
-         socket.emit('joinSucces', createWelcomeMessage(clientData))
-      })
+   let clientData = socketInit(socket)
+
+   socket.on('join', (name) => onJoin(clientData, name))
+   socket.on('subscribe', (channel) => onSubscribe(clientData, channel))
+   socket.on('question', (question, answerString, correctAnswer) => onQuestion(clientData, question, answerString, correctAnswer))
+
+   socket.on('answer', (guess) => onAnswer(clientData, guess))
+
+   socket.on('restart', () => {
+      subscribeToChannel(clientData)
    })
 
-   socket.on('question', (question, answerString, correctAnswer) => {
-      io.sockets.adapter.rooms[clientData.channel].currentAnswer = correctAnswer
-      io.sockets.adapter.rooms[clientData.channel].questionCounter++
-      socket.to(clientData.channel).emit('question', createQuestionString(question, answerString, clientData))
+   socket.on('leaveChannel', () => {
+      socket.leave(clientData.channel)
    })
 
-   socket.on('answer', (guess) => {
-      let answer = io.sockets.adapter.rooms[clientData.channel].currentAnswer
-      if (guess === answer) {
-         io.sockets.adapter.rooms[clientData.channel].subscribers[clientData.index].points++
-         socket.emit('correct', io.sockets.adapter.rooms[clientData.channel].subscribers[clientData.index].points)
-         io.to(clientData.channel).emit('questionAnswered', clientData.name)
-         if (io.sockets.adapter.rooms[clientData.channel].questionCounter >= numberOfQuestions) {
-            gameOver(socket, clientData)
-            return
-         }
-         io.sockets.connected[io.sockets.adapter.rooms[clientData.channel].moderatorId].emit('ask again')
-      } else {
-         socket.emit('wrong')
-      }
-   })
-
-   socket.on('disconnect', () => {
-      console.log(`${clientData.name} disconnected ${clientData.channel}`)
-      let index = io.sockets.adapter.rooms[clientData.channel].subscribers.findIndex(sub => {sub.name === clientData.name})
-      io.sockets.adapter.rooms[clientData.channel].subscribers.splice(index, 1)
-      io.to(clientData.channel).emit('disconnection', clientData.name)
-   })
+   socket.on('disconnect', () => onDisconnect(clientData))
 }
 
 server.listen(3000)
 
 console.log('server is listening on port 3000')
 
-function handleSubscribersAndChannel(clientData, socket) {
-   socket.join(clientData.channel)
+function subscribeToChannel(clientData) {
+   console.log(clientData.name)
+   channels = Object.keys(io.sockets.adapter.rooms)
+   getSocket(clientData).emit('selectChannel', channels)
+}
+
+function handleSubscribersAndChannel(clientData) {
+   console.log(clientData)
+   getSocket(clientData).join(clientData.channel)
    console.log(`${clientData.name} has joined ${clientData.channel}`)
-   socket.to(clientData.channel).emit('join', clientData.name)
-   if (io.sockets.adapter.rooms[clientData.channel].subscribers === undefined) {
-      io.sockets.adapter.rooms[clientData.channel].subscribers = [{name: clientData.name, isModerator: true}]
-      io.sockets.adapter.rooms[clientData.channel].moderatorId = socket.id
-      io.sockets.adapter.rooms[clientData.channel].questionCounter = 0
+   getSocket(clientData).to(clientData.channel).emit('newPlayer', clientData.name)
+   if (getChannel(clientData).subscribers === undefined) {
+      getChannel(clientData).subscribers = [{name: clientData.name, isModerator: true}]
+      getChannel(clientData).moderatorId = getSocket(clientData).id
+      getChannel(clientData).questionCounter = 0
       clientData.isModerator = true
       clientData.index = 0
    } else {
-      clientData.index = io.sockets.adapter.rooms[clientData.channel].subscribers.length
+      clientData.index = getChannel(clientData).subscribers.length
       clientData.isModerator = false
-      io.sockets.adapter.rooms[clientData.channel].subscribers.push({name: clientData.name, isModerator: false, points: 0})
+      getChannel(clientData).subscribers.push({name: clientData.name, isModerator: false, points: 0})
    }
-   subscribers = io.sockets.adapter.rooms[clientData.channel].subscribers
-   if (subscribers.length >= numberOfPlayers + 1 ) {
-      io.sockets.connected[io.sockets.adapter.rooms[clientData.channel].moderatorId].emit('ready')
+   if (getChannel(clientData).subscribers.length >= numberOfPlayers + 1 ) {
+      io.sockets.connected[getChannel(clientData).moderatorId].emit('ready')
    }
+   getSocket(clientData).emit('joinSucces', createWelcomeMessage(clientData))
 }
 
+function socketInit(socket) {
+   console.log("init function called")
+   let clientData = {
+      name: String,
+      channel: String,
+      index: Number,
+      isModerator: Boolean,
+      socketId: socket.id
+   }
+   socket.leave(Object.keys(io.sockets.adapter.rooms)[Object.keys(io.sockets.adapter.rooms).length - 1])
+   socket.emit('succes', "You have been connected.")
+   return clientData
+}
 
+function onJoin(clientData, name) {
+   clientData.name = name
+   console.log(`${name} has connected`)
+   subscribeToChannel(clientData)
+}
 
-function handleName(clientName, socket){
-   channels = Object.keys(io.sockets.adapter.rooms)
-   console.log(`${clientName} has connected`)
-   socket.emit('selectChannel', channels)
+function onSubscribe(clientData, channel) {
+   console.log("subscribeToChannel handler called")
+   clientData.channel = channel
+   handleSubscribersAndChannel(clientData)
 }
 
 function createWelcomeMessage(clientData) {
-   let otherSubscribers = [...io.sockets.adapter.rooms[clientData.channel].subscribers]
+   let otherSubscribers = [...getChannel(clientData).subscribers]
    otherSubscribers.splice(-1, 1)
    let moderator = otherSubscribers.find(person => person.isModerator)
    let otherPlayers = otherSubscribers.filter(person => !person.isModerator)
@@ -112,12 +113,48 @@ function createWelcomeMessage(clientData) {
 }
 
 function createQuestionString(question, answerString, clientData) {
-   return `Question number: ${io.sockets.adapter.rooms[clientData.channel].questionCounter}\n${question}\n${answerString}`
+   return `Question number: ${getChannel(clientData).questionCounter}\n${question}\n${answerString}`
 }
 
-function gameOver(socket, clientData) {
-   io.in(clientData.channel).emit('game over')
-   io.to(clientData.channel).emit('result', io.sockets.adapter.rooms[clientData.channel].subscribers)
-   io.sockets.adapter.rooms[clientData.channel].subscribers.sort((a,b) => { return Number(b.points) - Number(a.points) })
-   io.to(clientData.channel).emit('announce winner', io.sockets.adapter.rooms[clientData.channel].subscribers[1])
+function onQuestion(clientData, question, answerString, correctAnswer) {
+   getChannel(clientData).currentAnswer = correctAnswer
+   getChannel(clientData).isWaitingForAnswer = true
+   getChannel(clientData).questionCounter++
+   getSocket(clientData).to(clientData.channel).emit('question', createQuestionString(question, answerString, clientData))
+}
+
+function onAnswer(clientData, guess) {
+   let answer = getChannel(clientData).currentAnswer
+   if (guess === answer) {
+      getChannel(clientData).isWaitingForAnswer = false
+      getChannel(clientData).subscribers[clientData.index].points++
+      getSocket(clientData).emit('correct', getChannel(clientData).subscribers[clientData.index].points)
+      io.to(clientData.channel).emit('questionAnswered', clientData.name)
+      if (getChannel(clientData).questionCounter >= numberOfQuestions) {
+         gameOver(clientData)
+         return
+      }
+      io.to(clientData.channel).emit('next round', getChannel(clientData).moderatorId)
+   } else if (getChannel(clientData).isWaitingForAnswer) {
+      getSocket(clientData).emit('wrong')
+   }
+}
+
+function gameOver(clientData) {
+   io.to(clientData.channel).emit('game over')
+   io.to(clientData.channel).emit('result', getChannel(clientData).subscribers)
+   getChannel(clientData).subscribers.sort((a,b) => { return Number(b.points) - Number(a.points) })
+   console.log(getChannel(clientData))
+   io.to(clientData.channel).emit('announce winner', getChannel(clientData).subscribers[1])
+}
+
+function onDisconnect(clientData) {
+   if (getChannel(clientData)) {
+      console.log(`${clientData.name} disconnected ${clientData.channel}`)
+      let index = getChannel(clientData).subscribers.findIndex(sub => { sub.name === clientData.name })
+      getChannel(clientData).subscribers.splice(index, 1)
+      io.to(clientData.channel).emit('disconnection', clientData.name)
+   } else {
+      console.log(`${clientData.name} left the game.`)
+   }
 }

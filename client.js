@@ -28,6 +28,7 @@ socket.on('selectChannel', (channels) => {
    }
 
    rl.question("Pick or create one \n", (channel) => {
+      console.log("question callback")
       socket.emit('subscribe', channel)
    })
 })
@@ -36,7 +37,7 @@ socket.on('joinSucces', (message, index) => {
    console.log(message)
 })
 
-socket.on('join', (name) => {
+socket.on('newPlayer', (name) => {
    console.log(`> ${name} has joined the channel`)
 })
 
@@ -45,9 +46,11 @@ socket.on('ready', () => {
    askQuestion()
 })
 
-socket.on('ask again', () => {
+socket.on('next round', (moderatorId) => {
    console.log('Next round')
-   askQuestion()
+   if(moderatorId === socket.id) {
+      askQuestion()
+   }
 })
 
 socket.on('question', (question) => {
@@ -58,14 +61,14 @@ socket.on('question', (question) => {
 })
 
 socket.on('questionAnswered', (name) => {
-   console.log(`${name} was the first player to answer correctly`)
+   rl.write(`${name} was the first player to answer correctly\n`)
 })
 
 socket.on('wrong', () => {
    console.log(`Sorry, that is not correct.`)
 })
 
-socket.on('correct', points =>{
+socket.on('correct', points => {
    console.log(`Correct! You have ${points} points.`)
 })
 
@@ -83,6 +86,14 @@ socket.on('result', (players) => {
 
 socket.on('announce winner', (winner) => {
    console.log(`The winner is: ${winner.name}!`)
+   socket.emit('leaveChannel')
+   rl.question("Do you want to play again? (Y/N)\n", replay => {
+      if (replay == "Y") {
+         socket.emit('restart')
+      } else {
+         socket.close()
+      }
+   })
 })
 
 socket.on('disconnection', (name) => {
